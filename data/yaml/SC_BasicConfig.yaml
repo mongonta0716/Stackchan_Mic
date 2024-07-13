@@ -1,12 +1,13 @@
 servo: 
   pin: 
     # ServoPin
-    # Core1 PortA X:22,Y:21 PortC X:16,Y:17
-    # Core2 PortA X:33,Y:32 PortC X:13,Y:14
+    # Core1  PortA X:22,Y:21 PortC X:16,Y:17
+    # Core2  PortA X:33,Y:32 PortC X:13,Y:14
+    # CoreS3 PortA X:1,Y:2   PortC X:18,Y:17
     # Stack-chanPCB Core1 X:5,Y:2 Core2 X:19,Y27
     # When using SCS0009, x:RX, y:TX (not used).(StackchanRT Version:Core1 x16,y17, Core2: x13,y14)
-    x: 17
-    y: 18
+    x: 18
+    y: 17
   offset: 
     # Specified by +- from 90 degree during servo initialization
     x: 0
