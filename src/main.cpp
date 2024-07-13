@@ -11,6 +11,12 @@ goblib::UnifiedButton unifiedButton;
 #include <Stackchan_servo.h>
 #include <SD.h>
 
+
+#define BATTERT_CHK_INTERVAL 10000 // バッテリーチェックを行う間隔(msec)
+uint32_t last_battery_chk_time = 0;
+bool battery_chk_flag = false; // バッテリー表示をするかどうか
+
+
 #define USE_MIC
 
 #ifdef USE_MIC
@@ -38,7 +44,7 @@ goblib::UnifiedButton unifiedButton;
 #ifdef USE_LED
   #include <FastLED.h>
   #define NUM_LEDS 10
-  #define NUM_LEDS_HEX 18
+  #define NUM_LEDS_HEX 18 
 #if defined(ARDUINO_M5STACK_FIRE) || defined(ARDUINO_M5Stack_Core_ESP32)
   // M5Core1 + M5GoBottom1の組み合わせ
   #define LED_PIN 15
@@ -278,6 +284,7 @@ void setup()
       break;
    
      case m5::board_t::board_M5StackCore2:
+      first_cps = 4;
       scale = 1.0f;
       position_top = 0;
       position_left = 0;
@@ -325,7 +332,22 @@ void setup()
   SD.begin(GPIO_NUM_4, SPI, 25000000);
   delay(2000);
   system_config.loadConfig(SD, "/yaml/SC_BasicConfig.yaml");
-  
+ 
+  if ((system_config.getServoInfo(AXIS_X)->pin == 21)
+     || (system_config.getServoInfo(AXIS_X)->pin == 22)) {
+    // Port.Aを利用する場合は、I2Cが使えないのでアイコンは表示しない。
+    avatar.setBatteryIcon(false);
+    battery_chk_flag = false;
+    if (M5.getBoard() == m5::board_t::board_M5Stack) {
+      M5.In_I2C.release();
+    }
+  } else {
+    avatar.setBatteryIcon(true);
+    avatar.setBatteryStatus(M5.Power.isCharging(), M5.Power.getBatteryLevel());
+    last_battery_chk_time = millis();
+    battery_chk_flag = true;
+  }
+ 
   // servo
   servo.begin(system_config.getServoInfo(AXIS_X)->pin, system_config.getServoInfo(AXIS_X)->start_degree,
               system_config.getServoInfo(AXIS_X)->offset,
@@ -333,6 +355,7 @@ void setup()
               system_config.getServoInfo(AXIS_Y)->offset,
               (ServoType)system_config.getServoType());
   delay(2000);
+  M5.Power.setExtOutput(!system_config.getUseTakaoBase());
   avatar.init();
   
   servo_interval_s* servo_interval = system_config.getServoInterval(AvatarMode::NORMAL); // ノーマルモード時のサーボインターバル情報を取得
@@ -399,15 +422,10 @@ void loop()
     esp_restart();
 #endif
   } 
-//  if ((millis() - last_rotation_msec) > 100) {
-    //float angle = 10 * sin(count);
-    //avatar.setRotation(angle);
-    //last_rotation_msec = millis();
-    //count++;
-  //}
-
-  // avatar's face updates in another thread
-  // so no need to loop-by-loop rendering
-  //lipsync();
+  if (battery_chk_flag && ((millis() - last_battery_chk_time) > BATTERT_CHK_INTERVAL)) {
+    // 一定時間ごとにバッテリー表示を更新する。
+    avatar.setBatteryStatus(M5.Power.isCharging(), M5.Power.getBatteryLevel());
+    last_battery_chk_time = millis();
+  }
   lgfx::v1::delay(1);
 }
