@@ -32,7 +32,74 @@ goblib::UnifiedButton unifiedButton;
 
 #endif
 
+// M5GoBottomのLEDを使わない場合は下記の1行をコメントアウトしてください。
+#define USE_LED
 
+#ifdef USE_LED
+  #include <FastLED.h>
+  #define NUM_LEDS 10
+  #define NUM_LEDS_HEX 18
+#if defined(ARDUINO_M5STACK_FIRE) || defined(ARDUINO_M5Stack_Core_ESP32)
+  // M5Core1 + M5GoBottom1の組み合わせ
+  #define LED_PIN 15
+  #define LED_PIN_HEX 26
+  CLEDController *controllers[2];
+  uint8_t gHue = 0;
+#else
+  // M5Core2 + M5GoBottom2の組み合わせ
+  #define LED_PIN 25
+  #define LED_PIN_HEX 26
+  CLEDController *controllers[2];
+  uint8_t gHue = 0;
+#endif
+  CRGB leds[NUM_LEDS];
+  CRGB leds_hex[NUM_LEDS_HEX];
+  #ifdef USE_LED_OUT
+  CRGB leds_out[NUM_LED_OUT];
+  #endif
+
+  CHSV red (0, 255, 255);
+  CHSV green (95, 255, 255);
+  CHSV blue (160, 255, 255);
+  CHSV magenta (210, 255, 255);
+  CHSV yellow (45, 255, 255);
+  CHSV hsv_table[5] = { blue, green, yellow, magenta, red };
+  CHSV hsv_table_out[5] = { blue, green, yellow, magenta, red }; //red, magenta, yellow, green, blue };
+  uint8_t hue[5] = {0, 95, 160, 210, 45};
+
+  void turn_off_led() {
+    // Now turn the LED off, then pause
+    for(int i=0;i<NUM_LEDS;i++) leds[i] = CRGB::Black;
+    controllers[0]->showLeds(25);//FastLED.show();  
+  }
+
+  void clear_led_buff() {
+    // Now turn the LED off, then pause
+    for(int i=0;i<NUM_LEDS;i++) leds[i] =  CRGB::Black;
+  }
+
+  void level_led(int level1, int level2) {  
+  if(level1 > 5) level1 = 5;
+  if(level2 > 5) level2 = 5;
+    
+    clear_led_buff(); 
+    for(int i=0;i<level1;i++){
+      fill_rainbow(leds, NUM_LEDS, hue[i] );
+      //fill_gradient(leds, 0, hsv_table[i], 4, hsv_table[0] );
+      #ifdef USE_LED_OUT
+      fill_gradient(leds_out, 0, hsv_table_out[0], 18, hsv_table_out[i] );
+      #endif
+    }
+    for(int i=0;i<level2;i++){
+      fill_rainbow(leds, NUM_LEDS, hue[i] );
+      //fill_gradient(leds, 5, hsv_table[0], 9, hsv_table[i] );
+      #ifdef USE_LED_OUT
+      fill_gradient(leds_out, 19, hsv_table_out[i], 36, hsv_table_out[0] );
+      #endif
+    }
+    controllers[0]->showLeds(25);//FastLED.show();  
+  }
+#endif
 
 
 using namespace m5avatar;
@@ -96,6 +163,15 @@ void lipsync(void *args) {
     float ratio = 0.0f;
   #endif
     avatar->setMouthOpenRatio(mouth_ratio);
+#ifdef USE_LED
+    fill_rainbow( leds, NUM_LEDS, gHue);
+    controllers[0]->showLeds(25);//FastLED.show();  
+    fill_rainbow( leds_hex, NUM_LEDS_HEX, gHue, 7);
+    controllers[1]->showLeds(25);
+    EVERY_N_MILLISECONDS( 20 ) { gHue = gHue + 10; }
+#endif
+    vTaskDelay(3/portTICK_PERIOD_MS);
+    
   }  
 }
 
@@ -285,6 +361,15 @@ void setup()
   cps[5]->set(COLOR_PRIMARY, (uint16_t)0x000000);
   cps[5]->set(COLOR_BACKGROUND, 0x1a2bbd);//TFT_BLUE);
   avatar.setColorPalette(*cps[first_cps]);
+#ifdef USE_LED
+  controllers[0] = &FastLED.addLeds<SK6812, LED_PIN, GRB>(leds, NUM_LEDS);  // GRB ordering is typical
+  controllers[1] = &FastLED.addLeds<SK6812, LED_PIN_HEX, GRB>(leds_hex, NUM_LEDS_HEX).setCorrection(TypicalLEDStrip);  // GRB ordering is typical
+  //FastLED.setBrightness(25);
+  level_led(5, 5);
+  delay(1000);
+  turn_off_led();
+#endif
+
   avatar.addTask(lipsync, "lipsync");
   avatar.addTask(servoLoop, "ServoLoop");
   last_rotation_msec = lgfx::v1::millis();
