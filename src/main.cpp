@@ -44,7 +44,8 @@ bool battery_chk_flag = false; // バッテリー表示をするかどうか
 #ifdef USE_LED
   #include <FastLED.h>
   #define NUM_LEDS 10
-  #define NUM_LEDS_HEX 18 
+  #define NUM_LEDS_HEX 55 
+  #define LED_BRIGHTNESS 15
 #if defined(ARDUINO_M5STACK_FIRE) || defined(ARDUINO_M5Stack_Core_ESP32)
   // M5Core1 + M5GoBottom1の組み合わせ
   #define LED_PIN 15
@@ -76,7 +77,7 @@ bool battery_chk_flag = false; // バッテリー表示をするかどうか
   void turn_off_led() {
     // Now turn the LED off, then pause
     for(int i=0;i<NUM_LEDS;i++) leds[i] = CRGB::Black;
-    controllers[0]->showLeds(25);//FastLED.show();  
+    controllers[0]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
   }
 
   void clear_led_buff() {
@@ -103,7 +104,7 @@ bool battery_chk_flag = false; // バッテリー表示をするかどうか
       fill_gradient(leds_out, 19, hsv_table_out[i], 36, hsv_table_out[0] );
       #endif
     }
-    controllers[0]->showLeds(25);//FastLED.show();  
+    controllers[0]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
   }
 #endif
 
@@ -171,9 +172,9 @@ void lipsync(void *args) {
     avatar->setMouthOpenRatio(mouth_ratio);
 #ifdef USE_LED
     fill_rainbow( leds, NUM_LEDS, gHue);
-    controllers[0]->showLeds(25);//FastLED.show();  
+    controllers[0]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
     fill_rainbow( leds_hex, NUM_LEDS_HEX, gHue, 7);
-    controllers[1]->showLeds(25);
+    controllers[1]->showLeds(LED_BRIGHTNESS);
     EVERY_N_MILLISECONDS( 20 ) { gHue = gHue + 10; }
 #endif
     vTaskDelay(3/portTICK_PERIOD_MS);
@@ -212,13 +213,25 @@ void servoLoop(void *args) {
     
 //    Serial.printf("x:%f:y:%f\n", gaze_x, gaze_y);
     // X軸は90°から+-で左右にスイング
-    if (gaze_x < 0) {
-      move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * 15 + (int)(30.0 * gaze_x);
+    uint8_t move_mode = 1;   // 音がないときに動くかどうか。
+    if (move_mode == 0) {
+      if (gaze_x < 0) {
+        move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * 30 + (int)(60.0 * gaze_x);
+      } else {
+        move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * 30 + (int)(60 * gaze_x);
+      }
+      // Y軸は90°から上にスイング（最大35°）
+      move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * 10 - abs(25.0 * gaze_y);
     } else {
-      move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * 15 + (int)(30.0 * gaze_x);
-    }
-    // Y軸は90°から上にスイング（最大35°）
-    move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * 10 - abs(25.0 * gaze_y);
+      // 音がなっている時しか動かない。
+      if (gaze_x < 0) {
+        move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * random(20,50);
+      } else {
+        move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * random(20,50);
+      }
+      // Y軸は90°から上にスイング（最大35°）
+      move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * random(10, 20);
+   }
     servo.moveXY(move_x, move_y, move_time);
     vTaskDelay(interval_time/portTICK_PERIOD_MS);
   }
@@ -284,7 +297,7 @@ void setup()
       break;
    
      case m5::board_t::board_M5StackCore2:
-      first_cps = 4;
+      first_cps = 0;
       scale = 1.0f;
       position_top = 0;
       position_left = 0;
