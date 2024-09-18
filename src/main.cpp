@@ -9,6 +9,7 @@
 goblib::UnifiedButton unifiedButton;
 #include <Stackchan_system_config.h>
 #include <Stackchan_servo.h>
+#include <Stackchan_Takao_Base.hpp>
 #include <SD.h>
 
 
@@ -46,16 +47,22 @@ bool battery_chk_flag = false; // バッテリー表示をするかどうか
   #define NUM_LEDS 10
   #define NUM_LEDS_HEX 55 
   #define LED_BRIGHTNESS 15
-#if defined(ARDUINO_M5STACK_FIRE) || defined(ARDUINO_M5Stack_Core_ESP32)
+  static bool led_is_on = true; // LEDを点けるか点けないかのフラグ
+#if defined(ARDUINO_M5Stack_Core_ESP32)
   // M5Core1 + M5GoBottom1の組み合わせ
   #define LED_PIN 15
   #define LED_PIN_HEX 26
   CLEDController *controllers[2];
   uint8_t gHue = 0;
-#else
+#elif defined(ARDUINO_M5STACK_Core2)
   // M5Core2 + M5GoBottom2の組み合わせ
   #define LED_PIN 25
   #define LED_PIN_HEX 26
+  CLEDController *controllers[2];
+  uint8_t gHue = 0;
+#elif defined(ARDUINO_M5STACK_CORES3)
+  #define LED_PIN 5
+  #define LED_PIN_HEX 9
   CLEDController *controllers[2];
   uint8_t gHue = 0;
 #endif
@@ -77,12 +84,15 @@ bool battery_chk_flag = false; // バッテリー表示をするかどうか
   void turn_off_led() {
     // Now turn the LED off, then pause
     for(int i=0;i<NUM_LEDS;i++) leds[i] = CRGB::Black;
+    for(int i=0;i<NUM_LEDS_HEX;i++) leds_hex[i] = CRGB::Black;
     controllers[0]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
+    controllers[1]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
   }
 
   void clear_led_buff() {
     // Now turn the LED off, then pause
     for(int i=0;i<NUM_LEDS;i++) leds[i] =  CRGB::Black;
+    for(int i=0;i<NUM_LEDS_HEX;i++) leds_hex[i] =  CRGB::Black;
   }
 
   void level_led(int level1, int level2) {  
@@ -121,6 +131,8 @@ uint32_t last_lipsync_max_msec = 0;
 
 StackchanSERVO servo;
 StackchanSystemConfig system_config;
+static bool turn_mode = false; // 回転モードにするかどうか
+
 
 void lipsync(void *args) {
   
@@ -171,11 +183,15 @@ void lipsync(void *args) {
   #endif
     avatar->setMouthOpenRatio(mouth_ratio);
 #ifdef USE_LED
+  if (led_is_on) {
     fill_rainbow( leds, NUM_LEDS, gHue);
     controllers[0]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
     fill_rainbow( leds_hex, NUM_LEDS_HEX, gHue, 7);
     controllers[1]->showLeds(LED_BRIGHTNESS);
     EVERY_N_MILLISECONDS( 20 ) { gHue = gHue + 10; }
+  } else {
+    turn_off_led();
+  }
 #endif
     vTaskDelay(3/portTICK_PERIOD_MS);
     
@@ -209,30 +225,53 @@ void servoLoop(void *args) {
                        , system_config.getServoInterval(AvatarMode::SINGING)->move_max);
       sing_mode = true;
     } 
-    avatar->getGaze(&gaze_y, &gaze_x);
+    avatar->getRightGaze(&gaze_y, &gaze_x);
     
 //    Serial.printf("x:%f:y:%f\n", gaze_x, gaze_y);
-    // X軸は90°から+-で左右にスイング
-    uint8_t move_mode = 1;   // 音がないときに動くかどうか。
-    if (move_mode == 0) {
-      if (gaze_x < 0) {
-        move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * 30 + (int)(60.0 * gaze_x);
-      } else {
-        move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * 30 + (int)(60 * gaze_x);
-      }
-      // Y軸は90°から上にスイング（最大35°）
-      move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * 10 - abs(25.0 * gaze_y);
-    } else {
+    if (turn_mode) {
+      M5_LOGI("turn_mode");
+      // 回転して動くモード
       // 音がなっている時しか動かない。
-      if (gaze_x < 0) {
-        move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * random(20,50);
+      move_x = abs(gaze_x * 500);
+      //M5_LOGI("gaze_x: %2.2f\n", gaze_x);
+      //M5_LOGI("move_x: %d\n", move_x);
+      bool cw = true;
+      if (gaze_x >= 0.0f) {
+        cw = true;
       } else {
-        move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * random(20,50);
+        cw = false;
       }
       // Y軸は90°から上にスイング（最大35°）
       move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * random(10, 20);
-   }
-    servo.moveXY(move_x, move_y, move_time);
+      servo.turnX(move_x, cw, move_time);
+      vTaskDelay(move_time/portTICK_PERIOD_MS);
+      servo.moveY(move_y, move_time);
+      vTaskDelay(move_time/portTICK_PERIOD_MS);
+
+    } else {
+      M5_LOGI("normal_mode");
+      // X軸は90°から+-で左右にスイング
+      uint8_t move_mode = 1;   // 音がないときに動くかどうか。
+      if (move_mode == 0) {
+        if (gaze_x < 0) {
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * 30 + (int)(60.0 * gaze_x);
+        } else {
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * 30 + (int)(60 * gaze_x);
+        }
+        // Y軸は90°から上にスイング（最大35°）
+        move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * 10 - abs(25.0 * gaze_y);
+      } else {
+        // 音がなっている時しか動かない。
+        if (gaze_x < 0) {
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * random(20,50);
+        } else {
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * random(20,50);
+        }
+        // Y軸は90°から上にスイング（最大35°）
+        move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * random(10, 20);
+      }
+      servo.moveXY(move_x, move_y, move_time);
+    }
     vTaskDelay(interval_time/portTICK_PERIOD_MS);
   }
   vTaskDelete(NULL);
@@ -407,7 +446,7 @@ void setup()
 #endif
 
   avatar.addTask(lipsync, "lipsync");
-  avatar.addTask(servoLoop, "ServoLoop");
+  avatar.addTask(servoLoop, "ServoLoop", 4096);
   last_rotation_msec = lgfx::v1::millis();
   M5_LOGI("setup end");
 }
@@ -428,17 +467,41 @@ void loop()
     avatar.setColorPalette(*cps[palette_index]);
   }
   if (M5.BtnA.wasDoubleClicked()) {
-    M5.Display.setRotation(3);
+    led_is_on = !led_is_on;
+    if (!led_is_on) {
+      // ledをOFFにするときは黒に変更する。
+    }
+    //M5.Display.setRotation(3);
   }
   if (M5.BtnPWR.wasClicked()) {
 #ifdef ARDUINO
     esp_restart();
 #endif
   } 
+  if (M5.BtnB.wasPressed()) {
+    turn_mode = !turn_mode;
+    if (turn_mode) {
+      avatar.setSpeechText("Rotation");
+    } else {
+      avatar.setSpeechText("Normal  ");
+    }
+    M5_LOGI("turnmode %d\n", turn_mode);
+  }
+  if (M5.BtnC.wasPressed()) {
+    M5.Power.setExtOutput(!M5.Power.getExtOutput());
+    if (M5.Power.getExtOutput()) {
+      avatar.setSpeechText("ExtOutput");
+    } else {
+      avatar.setSpeechText("Battery  ");
+    }
+  }
   if (battery_chk_flag && ((millis() - last_battery_chk_time) > BATTERT_CHK_INTERVAL)) {
     // 一定時間ごとにバッテリー表示を更新する。
     avatar.setBatteryStatus(M5.Power.isCharging(), M5.Power.getBatteryLevel());
     last_battery_chk_time = millis();
+    avatar.setSpeechText("");
+   // PowerStatus status = checkTakaoBasePowerStatus(&M5.Power, 3200);
+   // M5_LOGI("PowerStatus: %d\n", status);
   }
   lgfx::v1::delay(1);
 }
