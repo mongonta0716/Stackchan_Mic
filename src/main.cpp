@@ -7,6 +7,7 @@
 #include <cinttypes>
 #include <Stackchan_system_config.h>
 #include <Stackchan_servo.h>
+#include <Stackchan_Takao_Base.hpp>
 #include <SD.h>
 
 
@@ -44,16 +45,22 @@ uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:�
   #define NUM_LEDS 10
   #define NUM_LEDS_HEX 55 
   #define LED_BRIGHTNESS 15
-#if defined(ARDUINO_M5STACK_FIRE) || defined(ARDUINO_M5Stack_Core_ESP32)
+  static bool led_is_on = true; // LEDを点けるか点けないかのフラグ
+#if defined(ARDUINO_M5Stack_Core_ESP32)
   // M5Core1 + M5GoBottom1の組み合わせ
   #define LED_PIN 15
   #define LED_PIN_HEX 26
   CLEDController *controllers[2];
   uint8_t gHue = 0;
-#else
+#elif defined(ARDUINO_M5STACK_Core2)
   // M5Core2 + M5GoBottom2の組み合わせ
   #define LED_PIN 25
   #define LED_PIN_HEX 26
+  CLEDController *controllers[2];
+  uint8_t gHue = 0;
+#elif defined(ARDUINO_M5STACK_CORES3)
+  #define LED_PIN 5
+  #define LED_PIN_HEX 9
   CLEDController *controllers[2];
   uint8_t gHue = 0;
 #endif
@@ -75,12 +82,15 @@ uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:�
   void turn_off_led() {
     // Now turn the LED off, then pause
     for(int i=0;i<NUM_LEDS;i++) leds[i] = CRGB::Black;
+    for(int i=0;i<NUM_LEDS_HEX;i++) leds_hex[i] = CRGB::Black;
     controllers[0]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
+    controllers[1]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
   }
 
   void clear_led_buff() {
     // Now turn the LED off, then pause
     for(int i=0;i<NUM_LEDS;i++) leds[i] =  CRGB::Black;
+    for(int i=0;i<NUM_LEDS_HEX;i++) leds_hex[i] =  CRGB::Black;
   }
 
   void level_led(int level1, int level2) {  
@@ -119,6 +129,8 @@ uint32_t last_lipsync_max_msec = 0;
 
 StackchanSERVO servo;
 StackchanSystemConfig system_config;
+static bool turn_mode = false; // 回転モードにするかどうか
+
 
 void lipsync(void *args) {
   
@@ -169,11 +181,15 @@ void lipsync(void *args) {
   #endif
     avatar->setMouthOpenRatio(mouth_ratio);
 #ifdef USE_LED
+  if (led_is_on) {
     fill_rainbow( leds, NUM_LEDS, gHue);
     controllers[0]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
     fill_rainbow( leds_hex, NUM_LEDS_HEX, gHue, 7);
     controllers[1]->showLeds(LED_BRIGHTNESS);
     EVERY_N_MILLISECONDS( 20 ) { gHue = gHue + 10; }
+  } else {
+    turn_off_led();
+  }
 #endif
     vTaskDelay(3/portTICK_PERIOD_MS);
     
@@ -207,7 +223,7 @@ void servoLoop(void *args) {
                        , system_config.getServoInterval(AvatarMode::SINGING)->move_max);
       sing_mode = true;
     } 
-    avatar->getGaze(&gaze_y, &gaze_x);
+    avatar->getRightGaze(&gaze_y, &gaze_x);
     
 //    Serial.printf("x:%f:y:%f\n", gaze_x, gaze_y);
     // X軸は90°から+-で左右にスイング
@@ -414,7 +430,7 @@ void setup()
 #endif
 
   avatar.addTask(lipsync, "lipsync");
-  avatar.addTask(servoLoop, "ServoLoop");
+  avatar.addTask(servoLoop, "ServoLoop", 4096);
   last_rotation_msec = lgfx::v1::millis();
   M5_LOGI("setup end");
 }
@@ -434,7 +450,13 @@ void loop()
     avatar.setColorPalette(*cps[palette_index]);
   }
   if (M5.BtnA.wasDoubleClicked()) {
-    M5.Display.setRotation(3);
+#ifdef USE_LED
+    led_is_on = !led_is_on;
+    if (!led_is_on) {
+      // ledをOFFにするときは黒に変更する。
+    }
+#endif
+    //M5.Display.setRotation(3);
   }
   if (M5.BtnB.wasPressed()) {
     move_mode++;
@@ -447,10 +469,30 @@ void loop()
     esp_restart();
 #endif
   } 
+  if (M5.BtnB.wasPressed()) {
+    turn_mode = !turn_mode;
+    if (turn_mode) {
+      avatar.setSpeechText("Rotation");
+    } else {
+      avatar.setSpeechText("Normal  ");
+    }
+    M5_LOGI("turnmode %d\n", turn_mode);
+  }
+  if (M5.BtnC.wasPressed()) {
+    M5.Power.setExtOutput(!M5.Power.getExtOutput());
+    if (M5.Power.getExtOutput()) {
+      avatar.setSpeechText("ExtOutput");
+    } else {
+      avatar.setSpeechText("Battery  ");
+    }
+  }
   if (battery_chk_flag && ((millis() - last_battery_chk_time) > BATTERT_CHK_INTERVAL)) {
     // 一定時間ごとにバッテリー表示を更新する。
     avatar.setBatteryStatus(M5.Power.isCharging(), M5.Power.getBatteryLevel());
     last_battery_chk_time = millis();
+    avatar.setSpeechText("");
+   // PowerStatus status = checkTakaoBasePowerStatus(&M5.Power, 3200);
+   // M5_LOGI("PowerStatus: %d\n", status);
   }
   lgfx::v1::delay(1);
 }
