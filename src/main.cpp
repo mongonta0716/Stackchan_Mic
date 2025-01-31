@@ -47,7 +47,7 @@ bool battery_chk_flag = false; // バッテリー表示をするかどうか
   #define NUM_LEDS 10
   #define NUM_LEDS_HEX 55 
   #define LED_BRIGHTNESS 15
-  static bool led_is_on = true; // LEDを点けるか点けないかのフラグ
+  static bool led_is_on = false; // LEDを点けるか点けないかのフラグ
 #if defined(ARDUINO_M5Stack_Core_ESP32)
   // M5Core1 + M5GoBottom1の組み合わせ
   #define LED_PIN 15
@@ -243,7 +243,7 @@ void servoLoop(void *args) {
       }
       // Y軸は90°から上にスイング（最大35°）
       move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * random(10, 20);
-      servo.turnX(move_x, cw, move_time);
+      //servo.turnX(move_x, cw, move_time);
       vTaskDelay(move_time/portTICK_PERIOD_MS);
       servo.moveY(move_y, move_time);
       vTaskDelay(move_time/portTICK_PERIOD_MS);
