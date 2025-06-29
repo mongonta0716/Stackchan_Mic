@@ -243,7 +243,7 @@ void servoLoop(void *args) {
       }
       // Y軸は90°から上にスイング（最大35°）
       move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * random(10, 20);
-      //servo.turnX(move_x, cw, move_time);
+      servo.turnX(move_x, cw, move_time);
       vTaskDelay(move_time/portTICK_PERIOD_MS);
       servo.moveY(move_y, move_time);
       vTaskDelay(move_time/portTICK_PERIOD_MS);
@@ -281,7 +281,7 @@ void setup()
 {
   auto cfg = M5.config();
   cfg.internal_mic = true;
-  cfg.output_power = false;
+  cfg.output_power = true;
   M5.begin(cfg);
   unifiedButton.begin(&M5.Display, goblib::UnifiedButton::appearance_t::transparent_all);
   M5.Log.setLogLevel(m5::log_target_display, ESP_LOG_NONE);
@@ -408,6 +408,7 @@ void setup()
               (ServoType)system_config.getServoType());
   delay(2000);
   M5.Power.setExtOutput(!system_config.getUseTakaoBase());
+
   avatar.init();
   
   servo_interval_s* servo_interval = system_config.getServoInterval(AvatarMode::NORMAL); // ノーマルモード時のサーボインターバル情報を取得
