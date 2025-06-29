@@ -5,8 +5,6 @@
 #include <Avatar.h>
 #include "fft.hpp"
 #include <cinttypes>
-#include <gob_unifiedButton.hpp>
-goblib::UnifiedButton unifiedButton;
 #include <Stackchan_system_config.h>
 #include <Stackchan_servo.h>
 #include <SD.h>
@@ -15,7 +13,7 @@ goblib::UnifiedButton unifiedButton;
 #define BATTERT_CHK_INTERVAL 10000 // バッテリーチェックを行う間隔(msec)
 uint32_t last_battery_chk_time = 0;
 bool battery_chk_flag = false; // バッテリー表示をするかどうか
-
+uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:音があるときだけ動く。2:回転あり
 
 #define USE_MIC
 
@@ -39,7 +37,7 @@ bool battery_chk_flag = false; // バッテリー表示をするかどうか
 #endif
 
 // M5GoBottomのLEDを使わない場合は下記の1行をコメントアウトしてください。
-#define USE_LED
+//#define USE_LED
 
 #ifdef USE_LED
   #include <FastLED.h>
@@ -213,26 +211,35 @@ void servoLoop(void *args) {
     
 //    Serial.printf("x:%f:y:%f\n", gaze_x, gaze_y);
     // X軸は90°から+-で左右にスイング
-    uint8_t move_mode = 1;   // 音がないときに動くかどうか。
-    if (move_mode == 0) {
-      if (gaze_x < 0) {
-        move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * 30 + (int)(60.0 * gaze_x);
-      } else {
-        move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * 30 + (int)(60 * gaze_x);
-      }
-      // Y軸は90°から上にスイング（最大35°）
-      move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * 10 - abs(25.0 * gaze_y);
-    } else {
-      // 音がなっている時しか動かない。
-      if (gaze_x < 0) {
-        move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * random(20,50);
-      } else {
-        move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * random(20,50);
-      }
-      // Y軸は90°から上にスイング（最大35°）
-      move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * random(10, 20);
-   }
-    servo.moveXY(move_x, move_y, move_time);
+    switch(move_mode) {
+      case 0:
+        // 音がなっている時しか動かない。
+        if (gaze_x < 0) {
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * 30 + (int)(60.0 * gaze_x);
+        } else {
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * 30 + (int)(60 * gaze_x);
+        }
+        // Y軸は90°から上にスイング（最大35°）
+        move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * 10 - abs(25.0 * gaze_y);
+        servo.moveXY(move_x, move_y, move_time);
+        break;
+      case 1:
+        // 音がないときも動く。
+        if (gaze_x < 0) {
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * random(20,50);
+        } else {
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * random(20,50);
+        }
+        move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * random(10, 20);
+        servo.moveXY(move_x, move_y, move_time);
+        break;
+      case 2:
+        // 回転あり
+        break;
+
+      default:
+        break;
+    };
     vTaskDelay(interval_time/portTICK_PERIOD_MS);
   }
   vTaskDelete(NULL);
@@ -244,7 +251,7 @@ void setup()
   cfg.internal_mic = true;
   cfg.output_power = false;
   M5.begin(cfg);
-  unifiedButton.begin(&M5.Display, goblib::UnifiedButton::appearance_t::transparent_all);
+  M5.setTouchButtonHeight(40);
   M5.Log.setLogLevel(m5::log_target_display, ESP_LOG_NONE);
   M5.Log.setLogLevel(m5::log_target_serial, ESP_LOG_INFO);
   M5.Log.setEnableColor(m5::log_target_serial, false);
@@ -339,11 +346,12 @@ void setup()
 #ifndef SDL_h_
   rec_data = (typeof(rec_data))heap_caps_malloc(WAVE_SIZE * sizeof(int16_t), MALLOC_CAP_8BIT);
   memset(rec_data, 0 , WAVE_SIZE * sizeof(int16_t));
-  M5.Mic.begin();
 #endif
   M5.Speaker.end();
-  SD.begin(GPIO_NUM_4, SPI, 25000000);
-  delay(2000);
+  if(!SD.begin(GPIO_NUM_4, SPI, 25000000)) {
+    M5.Log.println("SD Card Mount Failed");
+    delay(2000);
+  };
   system_config.loadConfig(SD, "/yaml/SC_BasicConfig.yaml");
  
   if ((system_config.getServoInfo(AXIS_X)->pin == 21)
@@ -369,7 +377,6 @@ void setup()
               (ServoType)system_config.getServoType());
   delay(2000);
   M5.Power.setExtOutput(!system_config.getUseTakaoBase());
-  avatar.init();
   
   servo_interval_s* servo_interval = system_config.getServoInterval(AvatarMode::NORMAL); // ノーマルモード時のサーボインターバル情報を取得
   servo_interval_s* servo_interval_sing = system_config.getServoInterval(AvatarMode::SINGING); // 歌っているときのサーボインターバル情報を取得
@@ -418,7 +425,6 @@ void loop()
 {
   M5.update();
 
-  unifiedButton.update();
   if (M5.BtnA.wasPressed()) {
     M5_LOGI("Push BtnA");
     palette_index++;
@@ -429,6 +435,12 @@ void loop()
   }
   if (M5.BtnA.wasDoubleClicked()) {
     M5.Display.setRotation(3);
+  }
+  if (M5.BtnB.wasPressed()) {
+    move_mode++;
+    if (move_mode > 2) {
+      move_mode = 0;
+    }
   }
   if (M5.BtnPWR.wasClicked()) {
 #ifdef ARDUINO
