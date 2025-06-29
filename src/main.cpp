@@ -264,7 +264,12 @@ void servoLoop(void *args) {
 void setup()
 {
   auto cfg = M5.config();
-  cfg.internal_mic = true;
+#ifdef ARDUINO_M5Stack_Core_ESP32
+  // M5StackBasic/Grayの場合は、外部マイクを使うので、内部マイクは無効にする。
+  cfg.internal_mic = false; 
+#else
+  cfg.internal_mic = true; 
+#endif
   cfg.output_power = false;
   M5.begin(cfg);
   M5.setTouchButtonHeight(40);
@@ -340,6 +345,13 @@ void setup()
       position_top = 0;
       position_left = 0;
       display_rotation = 1;
+  #ifdef ARDUINO_M5Stack_Core_ESP32
+      // M5Stack Basicの時は外部マイクを使うので下記のピンを設定する。(Port.A)
+      mic_cfg.i2s_port = i2s_port_t::I2S_NUM_0;
+      mic_cfg.pin_ws = 22;
+      mic_cfg.pin_data_in = 21;
+      M5.Mic.config(mic_cfg);
+  #endif
       break;
 
     case m5::board_t::board_M5Dial:
@@ -371,7 +383,10 @@ void setup()
   system_config.loadConfig(SD, "/yaml/SC_BasicConfig.yaml");
  
   if ((system_config.getServoInfo(AXIS_X)->pin == 21)
-     || (system_config.getServoInfo(AXIS_X)->pin == 22)) {
+     || (system_config.getServoInfo(AXIS_X)->pin == 22)
+     || (mic_cfg.pin_ws == 22)
+     || (mic_cfg.pin_data_in == 21)) {
+
     // Port.Aを利用する場合は、I2Cが使えないのでアイコンは表示しない。
     avatar.setBatteryIcon(false);
     battery_chk_flag = false;
@@ -429,7 +444,7 @@ void setup()
   turn_off_led();
 #endif
 
-  avatar.addTask(lipsync, "lipsync");
+  avatar.addTask(lipsync, "lipsync", 4098);
   avatar.addTask(servoLoop, "ServoLoop", 4096);
   last_rotation_msec = lgfx::v1::millis();
   M5_LOGI("setup end");
@@ -440,7 +455,6 @@ uint32_t count = 0;
 void loop()
 {
   M5.update();
-
   if (M5.BtnA.wasPressed()) {
     M5_LOGI("Push BtnA");
     palette_index++;
