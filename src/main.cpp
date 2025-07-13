@@ -38,7 +38,7 @@ uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:�
 #endif
 
 // M5GoBottomのLEDを使う場合は下記の1行をコメントアウトを外してください。
-// platformio.iniのlib_depsのFastLEDのコメントアウトも外してください。
+// CoreS3/CoreS3SEではFastLEDが動かないのでLEDは使用できません。
 // #define USE_LED
 
 #ifdef USE_LED
@@ -46,7 +46,7 @@ uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:�
   #define NUM_LEDS 10
   #define NUM_LEDS_HEX 55 
   #define LED_BRIGHTNESS 15
-  static bool led_is_on = true; // LEDを点けるか点けないかのフラグ
+  static bool led_is_on = false; // LEDを点けるか点けないかのフラグ
 #if defined(ARDUINO_M5Stack_Core_ESP32)
   // M5Core1 + M5GoBottom1の組み合わせ
   #define LED_PIN 15
