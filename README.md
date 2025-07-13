@@ -6,9 +6,14 @@ m5stack-avatar-micにサーボの機能とLED表示機能を追加しました�
 - マイク入力によるリップシンク（口の動き）
 - サーボモーターによる頭の動き制御
 - M5GoBottomのLED表示機能
-- 複数のM5Stackデバイスに対応（Core, Core2, CoreS3, M5StickC, M5StickC-Plus2, M5AtomS3など）
+- 複数のM5Stackデバイスに対応（Core, Core2/AWS, CoreS3/SEなど）
 - 複数のサーボタイプに対応（SG90 PWM, Feetech SCS0009, Dynamixel XL330）
 - TakaoBaseによる電源供給オプション
+
+## ビルドの注意事項
+CoreS3/SEだと、FastLEDのライブラリがplatformio.iniのlib_depsに入っているとビルドエラーになるため、FastLEDとUSE_LEDをコメントアウトしてあります。
+Core1/Core2でLEDを利用したい場合は、platformio.ini(30行目付近)とmain.cpp(41行目付近)のコメント部分のコメントアウトを外してください。
+
 
 ## セットアップ
 
