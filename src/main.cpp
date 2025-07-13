@@ -37,8 +37,9 @@ uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:�
 
 #endif
 
-// M5GoBottomのLEDを使わない場合は下記の1行をコメントアウトしてください。
-//#define USE_LED
+// M5GoBottomのLEDを使う場合は下記の1行をコメントアウトを外してください。
+// platformio.iniのlib_depsのFastLEDのコメントアウトも外してください。
+// #define USE_LED
 
 #ifdef USE_LED
   #include <FastLED.h>
@@ -231,9 +232,9 @@ void servoLoop(void *args) {
       case 0:
         // 音がなっている時しか動かない。
         if (gaze_x < 0) {
-          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * 30 + (int)(60.0 * gaze_x);
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * random(20,50);
         } else {
-          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * 30 + (int)(60 * gaze_x);
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * random(20,50);
         }
         // Y軸は90°から上にスイング（最大35°）
         move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * 10 - abs(25.0 * gaze_y);
@@ -242,20 +243,35 @@ void servoLoop(void *args) {
       case 1:
         // 音がないときも動く。
         if (gaze_x < 0) {
-          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * random(20,50);
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * 30 + (int)(15.0 * gaze_x);
         } else {
-          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * random(20,50);
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * 30 + (int)(15.0 * gaze_x);
         }
         move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * random(10, 20);
         servo.moveXY(move_x, move_y, move_time);
         break;
       case 2:
         // 回転あり
+        M5_LOGI("turn_mode");
+        // 回転して動くモード
+        // 音がなっている時しか動かない。
+        move_x = abs(gaze_x * 500);
+        //M5_LOGI("gaze_x: %2.2f\n", gaze_x);
+        //M5_LOGI("move_x: %d\n", move_x);
+        bool cw = true;
+        if (gaze_x >= 0.0f) {
+          cw = true;
+        } else {
+          cw = false;
+        }
+        // Y軸は90°から上にスイング（最大35°）
+        move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * random(10, 20);
+        servo.turnX(move_x, cw, move_time);
+        vTaskDelay(move_time/portTICK_PERIOD_MS);
+        servo.moveY(move_y, move_time);
+        vTaskDelay(move_time/portTICK_PERIOD_MS);
         break;
-
-      default:
-        break;
-    };
+    }
     vTaskDelay(interval_time/portTICK_PERIOD_MS);
   }
   vTaskDelete(NULL);
@@ -447,6 +463,7 @@ void setup()
   avatar.addTask(lipsync, "lipsync", 4098);
   avatar.addTask(servoLoop, "ServoLoop", 4096);
   last_rotation_msec = lgfx::v1::millis();
+  Serial1.begin(115200, SERIAL_8N1, 13, 14);
   M5_LOGI("setup end");
 }
 
@@ -484,15 +501,30 @@ void loop()
 #endif
   } 
   if (M5.BtnB.wasPressed()) {
-    turn_mode = !turn_mode;
-    if (turn_mode) {
-      avatar.setSpeechText("Rotation");
-    } else {
-      avatar.setSpeechText("Normal  ");
+    move_mode++;
+    switch (move_mode) {
+      case 0:
+        avatar.setSpeechText("SilentMode");
+        break;
+      case 1:
+        avatar.setSpeechText("HardMode");
+        break;
+      case 2:
+        avatar.setSpeechText("Rotation");
+        break;
+      default:
+        move_mode = 0;
+        avatar.setSpeechText("SilentMode");
     }
-    M5_LOGI("turnmode %d\n", turn_mode);
+    M5_LOGI("move_mode %d\n", move_mode);
   }
-  if (M5.BtnC.wasPressed()) {
+    if (M5.BtnC.wasPressed()) {
+    M5_LOGI("Push BtnC");
+    // Send character 'A' followed by newline over Serial2
+    Serial1.print("A\n");
+    Serial1.flush();
+  }
+  if (M5.BtnC.wasDoubleClicked()) {
     M5.Power.setExtOutput(!M5.Power.getExtOutput());
     if (M5.Power.getExtOutput()) {
       avatar.setSpeechText("ExtOutput");
