@@ -37,10 +37,10 @@ uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:�
 #endif
 
 // M5GoBottomのLEDを使わない場合は下記の1行をコメントアウトしてください。
-//#define USE_LED
+#define USE_LED
 
 #ifdef USE_LED
-  #include <FastLED.h>
+  #include <Adafruit_NeoPixel.h>
   #define NUM_LEDS 10
   #define NUM_LEDS_HEX 55 
   #define LED_BRIGHTNESS 15
@@ -48,61 +48,51 @@ uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:�
   // M5Core1 + M5GoBottom1の組み合わせ
   #define LED_PIN 15
   #define LED_PIN_HEX 26
-  CLEDController *controllers[2];
   uint8_t gHue = 0;
 #else
   // M5Core2 + M5GoBottom2の組み合わせ
   #define LED_PIN 25
   #define LED_PIN_HEX 26
-  CLEDController *controllers[2];
   uint8_t gHue = 0;
 #endif
-  CRGB leds[NUM_LEDS];
-  CRGB leds_hex[NUM_LEDS_HEX];
-  #ifdef USE_LED_OUT
-  CRGB leds_out[NUM_LED_OUT];
-  #endif
-
-  CHSV red (0, 255, 255);
-  CHSV green (95, 255, 255);
-  CHSV blue (160, 255, 255);
-  CHSV magenta (210, 255, 255);
-  CHSV yellow (45, 255, 255);
-  CHSV hsv_table[5] = { blue, green, yellow, magenta, red };
-  CHSV hsv_table_out[5] = { blue, green, yellow, magenta, red }; //red, magenta, yellow, green, blue };
+  // NeoPixel strips
+  Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+  Adafruit_NeoPixel strip_hex(NUM_LEDS_HEX, LED_PIN_HEX, NEO_GRB + NEO_KHZ800);
   uint8_t hue[5] = {0, 95, 160, 210, 45};
 
+  static inline uint32_t colorHSV8(Adafruit_NeoPixel &s, uint8_t h, uint8_t s8 = 255, uint8_t v8 = 255) {
+    // Map 0-255 HSV to NeoPixel's 0-65535, apply gamma correction
+    return s.gamma32(Adafruit_NeoPixel::ColorHSV((uint16_t)h * 257, (uint16_t)s8 * 257, (uint16_t)v8 * 257));
+  }
+
+  static void fillRainbow(Adafruit_NeoPixel &s, uint8_t startHue, uint8_t delta = 7) {
+    for (uint16_t i = 0; i < s.numPixels(); ++i) {
+      uint8_t h = startHue + (uint8_t)(i * delta);
+      s.setPixelColor(i, colorHSV8(s, h));
+    }
+  }
+
   void turn_off_led() {
-    // Now turn the LED off, then pause
-    for(int i=0;i<NUM_LEDS;i++) leds[i] = CRGB::Black;
-    controllers[0]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
+    // Turn all LEDs off
+    strip.clear();
+    strip.show();
   }
 
   void clear_led_buff() {
-    // Now turn the LED off, then pause
-    for(int i=0;i<NUM_LEDS;i++) leds[i] =  CRGB::Black;
+    // Clear buffer for inner strip
+    strip.clear();
   }
 
   void level_led(int level1, int level2) {  
   if(level1 > 5) level1 = 5;
   if(level2 > 5) level2 = 5;
     
-    clear_led_buff(); 
-    for(int i=0;i<level1;i++){
-      fill_rainbow(leds, NUM_LEDS, hue[i] );
-      //fill_gradient(leds, 0, hsv_table[i], 4, hsv_table[0] );
-      #ifdef USE_LED_OUT
-      fill_gradient(leds_out, 0, hsv_table_out[0], 18, hsv_table_out[i] );
-      #endif
+    clear_led_buff();
+    int showLevel = (level2 > 0) ? level2 : level1;
+    if (showLevel > 0) {
+      fillRainbow(strip, hue[showLevel - 1]);
     }
-    for(int i=0;i<level2;i++){
-      fill_rainbow(leds, NUM_LEDS, hue[i] );
-      //fill_gradient(leds, 5, hsv_table[0], 9, hsv_table[i] );
-      #ifdef USE_LED_OUT
-      fill_gradient(leds_out, 19, hsv_table_out[i], 36, hsv_table_out[0] );
-      #endif
-    }
-    controllers[0]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
+    strip.show();
   }
 #endif
 
@@ -169,17 +159,20 @@ void lipsync(void *args) {
   #endif
     avatar->setMouthOpenRatio(mouth_ratio);
 #ifdef USE_LED
-    fill_rainbow( leds, NUM_LEDS, gHue);
-    controllers[0]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
-    fill_rainbow( leds_hex, NUM_LEDS_HEX, gHue, 7);
-    controllers[1]->showLeds(LED_BRIGHTNESS);
-    EVERY_N_MILLISECONDS( 20 ) { gHue = gHue + 10; }
+    fillRainbow(strip, gHue, 7);
+    strip.show();
+    fillRainbow(strip_hex, gHue, 7);
+    strip_hex.show();
+    {
+      static uint32_t lastHueMs = 0;
+      uint32_t now = lgfx::v1::millis();
+      if (now - lastHueMs >= 20) { gHue = gHue + 10; lastHueMs = now; }
+    }
 #endif
     vTaskDelay(3/portTICK_PERIOD_MS);
     
   }  
 }
-
 void servoLoop(void *args) {
   DriveContext *ctx = (DriveContext *)args;
   Avatar *avatar = ctx->getAvatar();
@@ -211,13 +204,13 @@ void servoLoop(void *args) {
     
 //    Serial.printf("x:%f:y:%f\n", gaze_x, gaze_y);
     // X軸は90°から+-で左右にスイング
-    switch(move_mode) {
+      switch(move_mode) {
       case 0:
         // 音がなっている時しか動かない。
         if (gaze_x < 0) {
-          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * 30 + (int)(60.0 * gaze_x);
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * random(20,50);
         } else {
-          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * 30 + (int)(60 * gaze_x);
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * random(20,50);
         }
         // Y軸は90°から上にスイング（最大35°）
         move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * 10 - abs(25.0 * gaze_y);
@@ -226,20 +219,36 @@ void servoLoop(void *args) {
       case 1:
         // 音がないときも動く。
         if (gaze_x < 0) {
-          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * random(20,50);
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree - mouth_ratio * 30 + (int)(15.0 * gaze_x);
         } else {
-          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * random(20,50);
+          move_x = system_config.getServoInfo(AXIS_X)->start_degree + mouth_ratio * 30 + (int)(15.0 * gaze_x);
         }
-        move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * random(10, 20);
+        move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * 10 - abs(25.0 * gaze_y);
         servo.moveXY(move_x, move_y, move_time);
         break;
       case 2:
         // 回転あり
+        M5_LOGI("turn_mode");
+        // 回転して動くモード
+        // 音がなっている時しか動かない。
+        move_x = abs(gaze_x * 500);
+        //M5_LOGI("gaze_x: %2.2f\n", gaze_x);
+        //M5_LOGI("move_x: %d\n", move_x);
+        bool cw = true;
+        if (gaze_x >= 0.0f) {
+          cw = true;
+        } else {
+          cw = false;
+        }
+        // Y軸は90°から上にスイング（最大35°）
+        move_y = system_config.getServoInfo(AXIS_Y)->start_degree - mouth_ratio * 10 - abs(25.0 * gaze_y);
+        servo.turnX(move_x, cw, move_time);
+        vTaskDelay(move_time/portTICK_PERIOD_MS);
+        servo.moveY(move_y, move_time);
+        vTaskDelay(move_time/portTICK_PERIOD_MS);
         break;
+    }
 
-      default:
-        break;
-    };
     vTaskDelay(interval_time/portTICK_PERIOD_MS);
   }
   vTaskDelete(NULL);
@@ -249,7 +258,7 @@ void setup()
 {
   auto cfg = M5.config();
   cfg.internal_mic = true;
-  cfg.output_power = false;
+  cfg.output_power = true;
   M5.begin(cfg);
   M5.setTouchButtonHeight(40);
   M5.Log.setLogLevel(m5::log_target_display, ESP_LOG_NONE);
@@ -405,9 +414,10 @@ void setup()
   cps[5]->set(COLOR_BACKGROUND, 0x1a2bbd);//TFT_BLUE);
   avatar.setColorPalette(*cps[first_cps]);
 #ifdef USE_LED
-  controllers[0] = &FastLED.addLeds<SK6812, LED_PIN, GRB>(leds, NUM_LEDS);  // GRB ordering is typical
-  controllers[1] = &FastLED.addLeds<SK6812, LED_PIN_HEX, GRB>(leds_hex, NUM_LEDS_HEX).setCorrection(TypicalLEDStrip);  // GRB ordering is typical
-  //FastLED.setBrightness(25);
+  strip.begin();
+  strip_hex.begin();
+  strip.setBrightness(LED_BRIGHTNESS);
+  strip_hex.setBrightness(LED_BRIGHTNESS);
   level_led(5, 5);
   delay(1000);
   turn_off_led();
@@ -416,6 +426,10 @@ void setup()
   avatar.addTask(lipsync, "lipsync");
   avatar.addTask(servoLoop, "ServoLoop");
   last_rotation_msec = lgfx::v1::millis();
+  
+  // Initialize Serial2 for pins 13 (RX) and 14 (TX)
+  Serial1.begin(115200, SERIAL_8N1, 13, 14);
+  
   M5_LOGI("setup end");
 }
 
@@ -438,19 +452,44 @@ void loop()
   }
   if (M5.BtnB.wasPressed()) {
     move_mode++;
-    if (move_mode > 2) {
-      move_mode = 0;
+    switch (move_mode) {
+      case 0:
+        avatar.setSpeechText("SilentMode");
+        break;
+      case 1:
+        avatar.setSpeechText("HardMode");
+        break;
+      case 2:
+        avatar.setSpeechText("Rotation");
+        break;
+      default:
+        move_mode = 0;
+        avatar.setSpeechText("SilentMode");
+    }
+    M5_LOGI("move_mode %d\n", move_mode);
+  }
+    if (M5.BtnC.wasPressed()) {
+    M5_LOGI("Push BtnC");
+    // Send character 'A' followed by newline over Serial2
+    Serial1.print("A\n");
+    Serial1.flush();
+  }
+  if (M5.BtnC.wasDoubleClicked()) {
+    M5.Power.setExtOutput(!M5.Power.getExtOutput());
+    if (M5.Power.getExtOutput()) {
+      avatar.setSpeechText("ExtOutput");
+    } else {
+      avatar.setSpeechText("Battery  ");
     }
   }
-  if (M5.BtnPWR.wasClicked()) {
-#ifdef ARDUINO
-    esp_restart();
-#endif
-  } 
   if (battery_chk_flag && ((millis() - last_battery_chk_time) > BATTERT_CHK_INTERVAL)) {
     // 一定時間ごとにバッテリー表示を更新する。
     avatar.setBatteryStatus(M5.Power.isCharging(), M5.Power.getBatteryLevel());
     last_battery_chk_time = millis();
+    avatar.setSpeechText("");
+   // PowerStatus status = checkTakaoBasePowerStatus(&M5.Power, 3200);
+   // M5_LOGI("PowerStatus: %d\n", status);
   }
   lgfx::v1::delay(1);
+
 }
