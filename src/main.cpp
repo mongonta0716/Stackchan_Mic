@@ -7,6 +7,7 @@
 #include <cinttypes>
 #include <Stackchan_system_config.h>
 #include <Stackchan_servo.h>
+#include <Stackchan_Takao_Base.hpp>
 #include <SD.h>
 
 
@@ -44,15 +45,21 @@ uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:�
   #define NUM_LEDS 10
   #define NUM_LEDS_HEX 55 
   #define LED_BRIGHTNESS 15
-#if defined(ARDUINO_M5STACK_FIRE) || defined(ARDUINO_M5Stack_Core_ESP32)
+  static bool led_is_on = true; // LEDを点けるか点けないかのフラグ
+#if defined(ARDUINO_M5Stack_Core_ESP32)
   // M5Core1 + M5GoBottom1の組み合わせ
   #define LED_PIN 15
   #define LED_PIN_HEX 26
   uint8_t gHue = 0;
-#else
+#elif defined(ARDUINO_M5STACK_Core2)
   // M5Core2 + M5GoBottom2の組み合わせ
   #define LED_PIN 25
   #define LED_PIN_HEX 26
+  uint8_t gHue = 0;
+#elif defined(ARDUINO_M5STACK_CORES3)
+  #define LED_PIN 5
+  #define LED_PIN_HEX 9
+  CLEDController *controllers[2];
   uint8_t gHue = 0;
 #endif
   // NeoPixel strips
@@ -109,6 +116,8 @@ uint32_t last_lipsync_max_msec = 0;
 
 StackchanSERVO servo;
 StackchanSystemConfig system_config;
+static bool turn_mode = false; // 回転モードにするかどうか
+
 
 void lipsync(void *args) {
   
@@ -159,15 +168,15 @@ void lipsync(void *args) {
   #endif
     avatar->setMouthOpenRatio(mouth_ratio);
 #ifdef USE_LED
-    fillRainbow(strip, gHue, 7);
-    strip.show();
-    fillRainbow(strip_hex, gHue, 7);
-    strip_hex.show();
-    {
-      static uint32_t lastHueMs = 0;
-      uint32_t now = lgfx::v1::millis();
-      if (now - lastHueMs >= 20) { gHue = gHue + 10; lastHueMs = now; }
-    }
+  if (led_is_on) {
+    fill_rainbow( leds, NUM_LEDS, gHue);
+    controllers[0]->showLeds(LED_BRIGHTNESS);//FastLED.show();  
+    fill_rainbow( leds_hex, NUM_LEDS_HEX, gHue, 7);
+    controllers[1]->showLeds(LED_BRIGHTNESS);
+    EVERY_N_MILLISECONDS( 20 ) { gHue = gHue + 10; }
+  } else {
+    turn_off_led();
+  }
 #endif
     vTaskDelay(3/portTICK_PERIOD_MS);
     
@@ -200,7 +209,7 @@ void servoLoop(void *args) {
                        , system_config.getServoInterval(AvatarMode::SINGING)->move_max);
       sing_mode = true;
     } 
-    avatar->getGaze(&gaze_y, &gaze_x);
+    avatar->getRightGaze(&gaze_y, &gaze_x);
     
 //    Serial.printf("x:%f:y:%f\n", gaze_x, gaze_y);
     // X軸は90°から+-で左右にスイング
@@ -257,8 +266,13 @@ void servoLoop(void *args) {
 void setup()
 {
   auto cfg = M5.config();
-  cfg.internal_mic = true;
-  cfg.output_power = true;
+#ifdef ARDUINO_M5Stack_Core_ESP32
+  // M5StackBasic/Grayの場合は、外部マイクを使うので、内部マイクは無効にする。
+  cfg.internal_mic = false; 
+#else
+  cfg.internal_mic = true; 
+#endif
+  cfg.output_power = false;
   M5.begin(cfg);
   M5.setTouchButtonHeight(40);
   M5.Log.setLogLevel(m5::log_target_display, ESP_LOG_NONE);
@@ -333,6 +347,13 @@ void setup()
       position_top = 0;
       position_left = 0;
       display_rotation = 1;
+  #ifdef ARDUINO_M5Stack_Core_ESP32
+      // M5Stack Basicの時は外部マイクを使うので下記のピンを設定する。(Port.A)
+      mic_cfg.i2s_port = i2s_port_t::I2S_NUM_0;
+      mic_cfg.pin_ws = 22;
+      mic_cfg.pin_data_in = 21;
+      M5.Mic.config(mic_cfg);
+  #endif
       break;
 
     case m5::board_t::board_M5Dial:
@@ -364,7 +385,10 @@ void setup()
   system_config.loadConfig(SD, "/yaml/SC_BasicConfig.yaml");
  
   if ((system_config.getServoInfo(AXIS_X)->pin == 21)
-     || (system_config.getServoInfo(AXIS_X)->pin == 22)) {
+     || (system_config.getServoInfo(AXIS_X)->pin == 22)
+     || (mic_cfg.pin_ws == 22)
+     || (mic_cfg.pin_data_in == 21)) {
+
     // Port.Aを利用する場合は、I2Cが使えないのでアイコンは表示しない。
     avatar.setBatteryIcon(false);
     battery_chk_flag = false;
@@ -423,8 +447,8 @@ void setup()
   turn_off_led();
 #endif
 
-  avatar.addTask(lipsync, "lipsync");
-  avatar.addTask(servoLoop, "ServoLoop");
+  avatar.addTask(lipsync, "lipsync", 4098);
+  avatar.addTask(servoLoop, "ServoLoop", 4096);
   last_rotation_msec = lgfx::v1::millis();
   
   // Initialize Serial2 for pins 13 (RX) and 14 (TX)
@@ -438,7 +462,6 @@ uint32_t count = 0;
 void loop()
 {
   M5.update();
-
   if (M5.BtnA.wasPressed()) {
     M5_LOGI("Push BtnA");
     palette_index++;
@@ -448,7 +471,13 @@ void loop()
     avatar.setColorPalette(*cps[palette_index]);
   }
   if (M5.BtnA.wasDoubleClicked()) {
-    M5.Display.setRotation(3);
+#ifdef USE_LED
+    led_is_on = !led_is_on;
+    if (!led_is_on) {
+      // ledをOFFにするときは黒に変更する。
+    }
+#endif
+    //M5.Display.setRotation(3);
   }
   if (M5.BtnB.wasPressed()) {
     move_mode++;
@@ -482,6 +511,31 @@ void loop()
       avatar.setSpeechText("Battery  ");
     }
   }
+<<<<<<< HEAD
+=======
+  if (M5.BtnPWR.wasClicked()) {
+#ifdef ARDUINO
+    esp_restart();
+#endif
+  } 
+  if (M5.BtnB.wasPressed()) {
+    turn_mode = !turn_mode;
+    if (turn_mode) {
+      avatar.setSpeechText("Rotation");
+    } else {
+      avatar.setSpeechText("Normal  ");
+    }
+    M5_LOGI("turnmode %d\n", turn_mode);
+  }
+  if (M5.BtnC.wasPressed()) {
+    M5.Power.setExtOutput(!M5.Power.getExtOutput());
+    if (M5.Power.getExtOutput()) {
+      avatar.setSpeechText("ExtOutput");
+    } else {
+      avatar.setSpeechText("Battery  ");
+    }
+  }
+>>>>>>> 03d1994eac71b549d16134bcbf5008f256431331
   if (battery_chk_flag && ((millis() - last_battery_chk_time) > BATTERT_CHK_INTERVAL)) {
     // 一定時間ごとにバッテリー表示を更新する。
     avatar.setBatteryStatus(M5.Power.isCharging(), M5.Power.getBatteryLevel());
