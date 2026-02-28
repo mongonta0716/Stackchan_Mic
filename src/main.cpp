@@ -15,7 +15,7 @@
 uint32_t last_battery_chk_time = 0;
 bool battery_chk_flag = false; // バッテリー表示をするかどうか
 uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:音があるときだけ動く。2:回転あり
-
+#define USE_LED
 #define USE_MIC
 
 #ifdef USE_MIC
@@ -32,7 +32,7 @@ uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:�
   static int16_t *rec_data;
   
   // setupの最初の方の機種判別で書き換えている場合があります。そちらもチェックしてください。（マイクの性能が異なるため）
-  uint8_t lipsync_shift_level = 11; // リップシンクのデータをどのくらい小さくするか設定。口の開き方が変わります。
+  uint8_t lipsync_shift_level = 10; // リップシンクのデータをどのくらい小さくするか設定。口の開き方が変わります。
   float lipsync_max =LIPSYNC_LEVEL_MAX;  // リップシンクの単位ここを増減すると口の開き方が変わります。
 
 #endif
@@ -46,7 +46,7 @@ uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:�
   #define NUM_LEDS 10
   #define NUM_LEDS_HEX 55 
   #define LED_BRIGHTNESS 15
-  static bool led_is_on = false; // LEDを点けるか点けないかのフラグ
+  static bool led_is_on = true; // LEDを点けるか点けないかのフラグ
 #if defined(ARDUINO_M5Stack_Core_ESP32)
   // M5Core1 + M5GoBottom1の組み合わせ
   #define LED_PIN 15
@@ -286,7 +286,9 @@ void setup()
 #else
   cfg.internal_mic = true; 
 #endif
+#ifdef ARDUINO_M5STACK_CORES3
   cfg.output_power = false;
+#endif
   M5.begin(cfg);
   M5.setTouchButtonHeight(40);
   M5.Log.setLogLevel(m5::log_target_display, ESP_LOG_NONE);
@@ -421,10 +423,13 @@ void setup()
               system_config.getServoInfo(AXIS_X)->offset,
               system_config.getServoInfo(AXIS_Y)->pin, system_config.getServoInfo(AXIS_Y)->start_degree,
               system_config.getServoInfo(AXIS_Y)->offset,
-              (ServoType)system_config.getServoType());
+              (ServoType)system_config.getServoType(), &M5.In_I2C);
   delay(2000);
+
+// M5Stack CoreS3では外部出力の途中切り替えはできないのでsetupの最初で制御する。
+#ifndef ARDUINO_M5STACK_CORES3
   M5.Power.setExtOutput(!system_config.getUseTakaoBase());
-  
+#endif
   servo_interval_s* servo_interval = system_config.getServoInterval(AvatarMode::NORMAL); // ノーマルモード時のサーボインターバル情報を取得
   servo_interval_s* servo_interval_sing = system_config.getServoInterval(AvatarMode::SINGING); // 歌っているときのサーボインターバル情報を取得
 
@@ -518,12 +523,6 @@ void loop()
     }
     M5_LOGI("move_mode %d\n", move_mode);
   }
-    if (M5.BtnC.wasPressed()) {
-    M5_LOGI("Push BtnC");
-    // Send character 'A' followed by newline over Serial2
-    Serial1.print("A\n");
-    Serial1.flush();
-  }
   if (M5.BtnC.wasDoubleClicked()) {
     M5.Power.setExtOutput(!M5.Power.getExtOutput());
     if (M5.Power.getExtOutput()) {
@@ -531,6 +530,13 @@ void loop()
     } else {
       avatar.setSpeechText("Battery  ");
     }
+  } else if (M5.BtnC.wasSingleClicked()) {
+    M5_LOGI("Push BtnC");
+    const char* command = "START";
+    Serial1.print(command);
+    Serial1.print("\n");
+    avatar.setSpeechText(command);
+    Serial1.flush();
   }
   if (battery_chk_flag && ((millis() - last_battery_chk_time) > BATTERT_CHK_INTERVAL)) {
     // 一定時間ごとにバッテリー表示を更新する。
