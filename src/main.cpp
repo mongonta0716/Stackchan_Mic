@@ -14,7 +14,7 @@
 #define BATTERT_CHK_INTERVAL 10000 // バッテリーチェックを行う間隔(msec)
 uint32_t last_battery_chk_time = 0;
 bool battery_chk_flag = false; // バッテリー表示をするかどうか
-uint8_t move_mode = 0;   // 動作モード: 0:音がないときも動く。1:音があるときだけ動く。2:回転あり
+uint8_t move_mode = 1;   // 動作モード: 0:音が無いときは縦のみ動く。 1:音がないときも動く。2:回転あり
 #define USE_LED
 #define USE_MIC
 
@@ -123,6 +123,18 @@ using namespace m5avatar;
 Avatar avatar;
 ColorPalette *cps[6];
 uint8_t palette_index = 0;
+
+static void setAvatarSpeechTextSafely(const char *text) {
+  avatar.suspend();
+  avatar.setSpeechText(text);
+  avatar.resume();
+}
+
+static void setAvatarColorPaletteSafely(const ColorPalette& palette) {
+  avatar.suspend();
+  avatar.setColorPalette(palette);
+  avatar.resume();
+}
 
 float mouth_ratio = 0.0f;
 uint32_t last_rotation_msec = 0;
@@ -436,7 +448,6 @@ void setup()
   M5.Display.setRotation(display_rotation);
   avatar.setScale(scale);
   avatar.setPosition(position_top, position_left);
-  avatar.init(1); // start drawing
   cps[0] = new ColorPalette();
   cps[0]->set(COLOR_PRIMARY, TFT_BLACK);
   cps[0]->set(COLOR_BACKGROUND, TFT_YELLOW);
@@ -465,6 +476,7 @@ void setup()
   turn_off_led();
 #endif
 
+  avatar.init(1); // start drawing after avatar state is fully initialized
   avatar.addTask(lipsync, "lipsync", 4098);
   avatar.addTask(servoLoop, "ServoLoop", 4096);
   last_rotation_msec = lgfx::v1::millis();
@@ -483,7 +495,7 @@ void loop()
     if (palette_index > 5) {
       palette_index = 0;
     }
-    avatar.setColorPalette(*cps[palette_index]);
+    setAvatarColorPaletteSafely(*cps[palette_index]);
   }
   if (M5.BtnA.wasDoubleClicked()) {
 #ifdef USE_LED
@@ -494,12 +506,6 @@ void loop()
 #endif
     //M5.Display.setRotation(3);
   }
-  if (M5.BtnB.wasPressed()) {
-    move_mode++;
-    if (move_mode > 2) {
-      move_mode = 0;
-    }
-  }
   if (M5.BtnPWR.wasClicked()) {
 #ifdef ARDUINO
     esp_restart();
@@ -509,40 +515,40 @@ void loop()
     move_mode++;
     switch (move_mode) {
       case 0:
-        avatar.setSpeechText("SilentMode");
+        setAvatarSpeechTextSafely("SilentMode");
         break;
       case 1:
-        avatar.setSpeechText("HardMode");
+        setAvatarSpeechTextSafely("HardMode");
         break;
       case 2:
-        avatar.setSpeechText("Rotation");
+        setAvatarSpeechTextSafely("Rotation");
         break;
       default:
         move_mode = 0;
-        avatar.setSpeechText("SilentMode");
+        setAvatarSpeechTextSafely("SilentMode");
     }
     M5_LOGI("move_mode %d\n", move_mode);
   }
   if (M5.BtnC.wasDoubleClicked()) {
     M5.Power.setExtOutput(!M5.Power.getExtOutput());
     if (M5.Power.getExtOutput()) {
-      avatar.setSpeechText("ExtOutput");
+      setAvatarSpeechTextSafely("ExtOutput");
     } else {
-      avatar.setSpeechText("Battery  ");
+      setAvatarSpeechTextSafely("Battery  ");
     }
   } else if (M5.BtnC.wasSingleClicked()) {
     M5_LOGI("Push BtnC");
     const char* command = "START";
     Serial1.print(command);
     Serial1.print("\n");
-    avatar.setSpeechText(command);
+    setAvatarSpeechTextSafely(command);
     Serial1.flush();
   }
   if (battery_chk_flag && ((millis() - last_battery_chk_time) > BATTERT_CHK_INTERVAL)) {
     // 一定時間ごとにバッテリー表示を更新する。
     avatar.setBatteryStatus(M5.Power.isCharging(), M5.Power.getBatteryLevel());
     last_battery_chk_time = millis();
-    avatar.setSpeechText("");
+    setAvatarSpeechTextSafely("");
    // PowerStatus status = checkTakaoBasePowerStatus(&M5.Power, 3200);
    // M5_LOGI("PowerStatus: %d\n", status);
   }
